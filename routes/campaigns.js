@@ -21,6 +21,19 @@ router.get('/', function(req, res) {
 })
 
 
+router.use('/:campaignId', function(req, res, next) {
+  console.log(req.params.campaignId)
+    client.reports.getCampaignReport(req.params.campaignId).then(response => {
+      
+        res.json(response)
+        next()    
+    }
+    ).catch(console.log("Error"))    
+})
+
+router.get('/:campaignId', function(req, res) {
+  res.end()    
+})
 
 router.get('/download', function(req, res) {
     var wb = new xl.Workbook();
@@ -31,3 +44,14 @@ router.get('/download', function(req, res) {
 
 
 module.exports = router
+
+// const endpoint = 'https://jsonplaceholder.typicode.com/posts/1';
+// const asyncMiddleware = async (req,res,next) => {
+//   const data = await PromiseBasedDataRequest(endpoint);
+//   req.data = data.json()
+//   next()
+// }
+// app.get('/', asyncMiddleware, (req,res) => {
+//   const { title, body } = req.data;
+//   req.render('post', { title, body });
+// })
