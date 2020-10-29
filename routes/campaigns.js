@@ -133,7 +133,7 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
     ws.cell(15, 1).string('Recipients Who Clicked:').style(bold)
     ws.cell(16, 1).string('Click-Through Rate:').style(bold)
     ws.cell(17, 1).string('Total Clicks:').style(bold)
-    ws.cell(18, 1).string('Total Unsubs:').style(bold)
+    ws.cell(18, 1).string('Total Unsubs:').style(bold) 
     ws.cell(19, 1).string('Total Abuse Complaints:').style({font:{bold:true}, border:{bottom:{style:'thin', color:'#000000'}}})
     wb.write(`${campaign.campaign_title}.xlsx`, res);
 })
