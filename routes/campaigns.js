@@ -8,6 +8,7 @@ client.setConfig({
     server: process.env.SERVER_PREFIX
   })
 
+
 const allCampaigns = async (req,res,next) => {
   const data = await client.reports.getAllCampaignReports()
   res.json(data)
@@ -27,8 +28,15 @@ router.get('/:campaignId', oneCampaign, (req,res) => {
   res.end()
 })
 
+const campaignDownload = async(req, res, next) => {
+    const data = await client.reports.getCampaignReport(req.params.campaignId)
+    req.requestTime = data
+    next()
+}
 
-router.get('/:campaignId/download', function(req, res) {
+
+router.get('/:campaignId/download', campaignDownload, (req, res) => {
+   console.log(req.requestTime)
     var wb = new xl.Workbook();
     var ws = wb.addWorksheet('SHEET_NAME');
     ws.cell(1, 1).string('ALL YOUR EXCEL SHEET FILE CONTENT');
