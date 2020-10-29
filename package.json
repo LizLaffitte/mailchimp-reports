@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "node ./bin/www"
+    "start": "node ./bin/www",
+    "devstart": "nodemon ./bin/www",
+    "serverstart": "npm run devstart"
   },
   "dependencies": {
     "@mailchimp/mailchimp_marketing": "^3.0.22",
@@ -15,6 +17,11 @@
     "express": "~4.16.1",
     "http-errors": "^1.6.3",
     "jade": "~1.11.0",
+    "mongodb": "^3.6.2",
+    "mongoose": "^5.10.11",
     "morgan": "~1.9.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.6"
   }
 }
