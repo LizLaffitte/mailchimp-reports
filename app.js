@@ -11,7 +11,7 @@ var app = express();
 var mongoose = require('mongoose')
 
 const mongoDB = `mongodb+srv://${process.env.USERNAME}:${process.env.PW}@cluster0.155pr.mongodb.net/<dbname>?retryWrites=true&w=majority`;
-mongoose.connect(mongoDB, {useNewUrlParser: true, useUnifiedTopology: true})
+mongoose.connect(mongoDB, {useNewUrlParser: true, useUnifiedTopology: true, useFindAndModify: false   })
 const db  = mongoose.connection
 db.on('error', console.error.bind(console, 'MongoDB connection error:'))
 db.once('open', function() {
