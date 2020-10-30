@@ -65,7 +65,7 @@ router.get('/:campaignId', oneCampaign, (req,res) => {
 })
 
 const campaignClicks = async (req,res,next) => {
-  const data = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"]})
+  const data = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
   res.json(data)
   next()
 }
@@ -75,7 +75,7 @@ router.get('/:campaignId/clicks', campaignClicks, (req,res) => {
 })
 
 const campaignOpens = async (req,res,next) => {
-  const data = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields.AIRID", "members.opens_count"]})
+  const data = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
   res.json(data)
   next()
 }
@@ -98,23 +98,26 @@ router.get('/:campaignId/clicks-by-email', campaignEmailClicks, (req,res) => {
 const campaignDownload = async(req, res, next) => {
 
     const data = await client.reports.getCampaignReport(req.params.campaignId)
-    const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"]})
-    const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields.AIRID", "members.opens_count"]})
+    const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
+    const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
     let report = new Report({title: data.campaign_title, id: data.id})
     req.selectedCampaign = data
     req.selectedCampaignID = req.params.campaignId
     req.clickData = clickData.urls_clicked
+    req.openData = []
     req.openData = openData.members
     req.selectedReport = findOrCreate({id: report.id}, data, report)
     next()
 }
+let linkObj = {}
 
-const linkIds = async(req,res,next) => {
+const pullLinkIds = async(req,res,next) => {
   let links = []
-  for(const [k, v] in req.clickData){
+  for(const k in req.clickData){
     links.push(req.clickData[k].id)
+    linkObj[k.id] = req.clickData[k].url
   }
-  req.linkData = links
+  req.linkIDs = links
   next()
 }
 async function asyncForEach(array, callback) {
@@ -122,18 +125,30 @@ async function asyncForEach(array, callback) {
     await callback(array[index], index, array);
   }
 }
-let linkDetailsArr = []
+let linkDetailsObj = []
+
 const linkDetails = async(req,res,next) => {
-  await asyncForEach(req.linkData, async (id) =>{
-    const response = await client.reports.getSubscribersInfo(req.selectedCampaignID,id, {fields: ["members.email_address", "members.merge_fields.AIRID","members.clicks", "members._links"]})    
-    linkDetailsArr.push(response.members)
+  await asyncForEach(req.linkIDs, async (id) =>{
+    const response = await client.reports.getSubscribersInfo(req.selectedCampaignID,id, {fields: ["members.email_address", "members.merge_fields","members.clicks"]})  
+    if(response.members[0] != undefined){
+      let linkArr = [id, response.members]
+      linkDetailsObj.push(linkArr)
+    }
+    
+
   } )
   next()
 }
 
-
-
-router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (req, res) => {
+const subDetails = async(req,res,next) => {
+    const response = await client.reports.getSubscribersInfo(req.params.campaign_id,req.params.link_id, {fields: ["members.email_address", "members.merge_fields","members.clicks"]})   
+    res.json(response.members)
+  next()
+}
+router.get('/:campaign_id/click-details/:link_id/members', subDetails, (req,res) => {
+  res.end()
+})
+router.get('/:campaignId/download', [campaignDownload, pullLinkIds, linkDetails], (req, res) => {
    let campaign = req.selectedCampaign
     var wb = new xl.Workbook({ 
       defaultFont: {
@@ -190,13 +205,13 @@ router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (r
     let colCount = 2
     function clickURLTable(obj, x, y){
       
-      for (const [k, v] in obj){
+      for (const k in obj){
       clickTableCells.push(ws.cell(x, y).string(obj[k].url))
       clickTableCells.push(ws.cell(x, y+1).number(obj[k].total_clicks))
       clickTableCells.push(ws.cell(x, y+2).number(obj[k].unique_clicks)) 
         x+= 1
       }
-      rowCount += clickTableCells.length 
+      rowCount = x + 1
       return clickTableCells
       
     }
@@ -204,9 +219,14 @@ router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (r
 
     let openTableCells = []
     function openTable(obj, x, y){
-      for (const [k, v] in obj){
+      for (const k in obj){
       openTableCells.push(ws.cell(x, y).string(obj[k].email_address))
-      openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))
+      if(obj[k].merge_fields.AIRID){
+        openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))
+      } else if(obj[k].merge_fields.MMERGE4){
+        openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.MMERGE4))
+      }
+      
       openTableCells.push(ws.cell(x, y+2).number(obj[k].opens_count)) 
         x+= 1
       }
@@ -217,14 +237,15 @@ router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (r
     let clicksEmailTable = []
     function clicksTable(obj, x, y){
       for (const [k, v] in obj){
-        if(obj[k] ){
+
           clicksEmailTable.push(ws.cell(x, y).string(obj[k].email_address))   
-          if(obj[k].merge_fields){
-            clicksEmailTable.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))  
-          }
-            
+          // if(obj[k].merge_fields && obj[k].merge_fields['MMERGE4']){
+          //   clicksEmailTable.push(ws.cell(x, y+1).string(obj[k].merge_fields['MMERGE4']))  
+          // } else if ( obj[k].merge_fields && obj[k].merge_fields['AIRID']){
+          //   clicksEmailTable.push(ws.cell(x, y+1).string(obj[k].merge_fields['AIRID']))  
+          // }
           // clicksEmailTable.push(ws.cell(x, y+2).number(obj[k].opens_count)) 
-      }
+
         x+= 1
       }
       colCount += 3
@@ -232,9 +253,7 @@ router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (r
       
     }
     
-    ws.column(1).setWidth(40);
-    ws.column(2).setWidth(22);
-    ws.column(3).setWidth(22);
+    
     ws.cell(1, 1).string('Email Campaign Report').style({font:{size:20, bold:true}})
     ws.cell(2, 1).string('Title:').style(header1)
     ws.cell(2, 2).string(campaign.campaign_title).style(header1)
@@ -293,9 +312,15 @@ router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (r
 
     
 
-    clicksTable(linkDetailsArr, rowCount, colCount)
+    // clicksTable(linkDetailsObj, rowCount, colCount)
+    console.log(linkDetailsObj)
+ 
     colCount += 5
-    wb.write(`${campaign.campaign_title}.xlsx`, res);
+    ws.column(1).setWidth(40);
+    ws.column(2).setWidth(22);
+    ws.column(3).setWidth(22);
+    // wb.write(`${campaign.campaign_title}.xlsx`, res);
+    res.end
 
 })
 
