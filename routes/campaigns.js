@@ -70,8 +70,28 @@ const campaignClicks = async (req,res,next) => {
   next()
 }
 
-
 router.get('/:campaignId/clicks', campaignClicks, (req,res) => {
+  res.end()
+})
+
+const campaignOpens = async (req,res,next) => {
+  const data = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields.AIRID", "members.opens_count"]})
+  res.json(data)
+  next()
+}
+
+router.get('/:campaignId/opens', campaignOpens, (req,res) => {
+  res.end()
+})
+
+
+const campaignEmailClicks = async (req,res,next) => {
+  const data = await client.reports.getCampaignClickDetails(req.params.campaignId)
+  res.json(data)
+  next()
+}
+
+router.get('/:campaignId/clicks-by-email', campaignEmailClicks, (req,res) => {
   res.end()
 })
 
@@ -79,14 +99,41 @@ const campaignDownload = async(req, res, next) => {
 
     const data = await client.reports.getCampaignReport(req.params.campaignId)
     const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"]})
+    const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields.AIRID", "members.opens_count"]})
     let report = new Report({title: data.campaign_title, id: data.id})
     req.selectedCampaign = data
+    req.selectedCampaignID = req.params.campaignId
     req.clickData = clickData.urls_clicked
+    req.openData = openData.members
     req.selectedReport = findOrCreate({id: report.id}, data, report)
     next()
 }
 
-router.get('/:campaignId/download', campaignDownload, (req, res) => {
+const linkIds = async(req,res,next) => {
+  let links = []
+  for(const [k, v] in req.clickData){
+    links.push(req.clickData[k].id)
+  }
+  req.linkData = links
+  next()
+}
+async function asyncForEach(array, callback) {
+  for (let index = 0; index < array.length; index++) {
+    await callback(array[index], index, array);
+  }
+}
+let linkDetailsArr = []
+const linkDetails = async(req,res,next) => {
+  await asyncForEach(req.linkData, async (id) =>{
+    const response = await client.reports.getSubscribersInfo(req.selectedCampaignID,id, {fields: ["members.email_address", "members.merge_fields.AIRID","members.clicks", "members._links"]})    
+    linkDetailsArr.push(response.members)
+  } )
+  next()
+}
+
+
+
+router.get('/:campaignId/download', [campaignDownload, linkIds, linkDetails], (req, res) => {
    let campaign = req.selectedCampaign
     var wb = new xl.Workbook({ 
       defaultFont: {
@@ -138,15 +185,51 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
       return ws.cell(row, col).date(new Date(date)).style({numberFormat: 'm/d/yyyy h:mm AM/PM', border:{ right: {style:'thin', color:'#000000'}}})
       }
     }
-    function clickTable(obj, x, y){
-      let tableCells = []
+    let clickTableCells = []
+    let rowCount = 5
+    let colCount = 2
+    function clickURLTable(obj, x, y){
+      
       for (const [k, v] in obj){
-      tableCells.push(ws.cell(x, y).string(obj[k].url))
-      tableCells.push(ws.cell(x, y+1).number(obj[k].total_clicks))
-      tableCells.push(ws.cell(x, y+2).number(obj[k].unique_clicks)) 
+      clickTableCells.push(ws.cell(x, y).string(obj[k].url))
+      clickTableCells.push(ws.cell(x, y+1).number(obj[k].total_clicks))
+      clickTableCells.push(ws.cell(x, y+2).number(obj[k].unique_clicks)) 
         x+= 1
       }
-      return tableCells
+      rowCount += clickTableCells.length 
+      return clickTableCells
+      
+    }
+    
+
+    let openTableCells = []
+    function openTable(obj, x, y){
+      for (const [k, v] in obj){
+      openTableCells.push(ws.cell(x, y).string(obj[k].email_address))
+      openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))
+      openTableCells.push(ws.cell(x, y+2).number(obj[k].opens_count)) 
+        x+= 1
+      }
+      colCount += 3
+      return openTableCells
+      
+    }
+    let clicksEmailTable = []
+    function clicksTable(obj, x, y){
+      for (const [k, v] in obj){
+        if(obj[k] ){
+          clicksEmailTable.push(ws.cell(x, y).string(obj[k].email_address))   
+          if(obj[k].merge_fields){
+            clicksEmailTable.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))  
+          }
+            
+          // clicksEmailTable.push(ws.cell(x, y+2).number(obj[k].opens_count)) 
+      }
+        x+= 1
+      }
+      colCount += 3
+      return clicksEmailTable
+      
     }
     
     ws.column(1).setWidth(40);
@@ -193,8 +276,25 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
     ws.cell(23, 1).string("URL").style(tableHeader)
     ws.cell(23, 2).string("Total Clicks").style(tableHeader)
     ws.cell(23, 3).string("Unique Clicks").style(tableHeader)
-    clickTable(req.clickData, 24, 1)
-    console.log(req.clickData[0].total_clicks)
+    clickURLTable(req.clickData, 24, 1)
+
+    ws.cell(rowCount, 1).string("Opens").style(header2)
+    ws.cell(rowCount+1, 1).string("Email Address").style(tableHeader)
+    ws.cell(rowCount+1, 2).string("AIR ID").style(tableHeader)
+    ws.cell(rowCount+1, 3).string("Opens").style(tableHeader)
+    openTable(req.openData, rowCount+2, 1)
+
+    ws.cell(rowCount, colCount).string("Clicks by Email Address").style(header2)
+    ws.cell(rowCount+1, colCount).string("Email Address").style(tableHeader)
+    ws.cell(rowCount+1, colCount+1).string("AIR ID").style(tableHeader)
+    ws.cell(rowCount+1, colCount+2).string("URL").style(tableHeader)
+    ws.cell(rowCount+1, colCount+3).string("Clicks").style(tableHeader)
+
+
+    
+
+    clicksTable(linkDetailsArr, rowCount, colCount)
+    colCount += 5
     wb.write(`${campaign.campaign_title}.xlsx`, res);
 
 })
