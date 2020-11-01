@@ -24,12 +24,36 @@ const allCampaigns = async (req,res,next) => {
 router.get('/', allCampaigns, (req,res) => {
   res.end()
 })
-function handleError(error){
-  console.log(error)
+
+const getSubActivity = async (req, res, next) => {
+  req.subData = await client.reports.getEmailActivityForCampaign(req.params.campaignId, {fields:["emails.email_address", "emails.email_id", "emails.activity"],count:1000})
+  next()
 }
+const showSubActivity = async (req, res, next) => {
+  const data = req.subData
+  let usersWhoClicked = []
+  let usersWhoBounced = []
+  let usersWithActivity = data.emails.filter(emailObj => {
+    if(emailObj.activity.length > 0){
+      if(emailObj.activity[0].action == "bounce"){
+        usersWhoBounced.push(emailObj)
+        return emailObj
+      } else if(emailObj.activity.length > 1){
+        usersWhoClicked.push(emailObj)
+        return emailObj
+      }
+    }
+  })
+  req.usersWithActivity = usersWithActivity
+  res.json(data)
+  next()
+}
+router.get('/:campaignId/activity', [getSubActivity, showSubActivity], (req,res) => {
+  res.end()
+})
 
 async function findOrCreate(data){
-  const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line}
+  const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line, bounces: (data.bounces.hard_bounces + data.bounces.soft_bounces)}
   let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
 
   return (myReport ? myReport : Report.newReport(newDetails))
@@ -37,7 +61,7 @@ async function findOrCreate(data){
 const oneCampaign = async (req,res,next) => {
   const data = await client.reports.getCampaignReport(req.params.campaignId)
   const report = await findOrCreate(data)
-  console.log(report)
+  console.log("Report:", report)
   res.json(data)
 }
 
@@ -81,7 +105,7 @@ const campaignDownload = async(req, res, next) => {
     const data = await client.reports.getCampaignReport(req.params.campaignId)
     const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
     const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
-    let report = new Report({title: data.campaign_title, id: data.id})
+    let report =  await findOrCreate(data)
     req.selectedCampaign = data
     req.selectedCampaignID = req.params.campaignId
     req.clickData = clickData.urls_clicked
@@ -94,7 +118,7 @@ let linkObj = []
 
 const pullLinkIds = async(req,res,next) => {
   for(const k in req.clickData){ 
-    if(req.clickData[k].tital_clicks > 0) {
+    if(req.clickData[k].total_clicks > 0) {
       let obj = {id: req.clickData[k].id, url: req.clickData[k].url}
       linkObj.push(obj)
     }
@@ -122,7 +146,7 @@ const subDetails = async(req,res,next) => {
 router.get('/:campaign_id/click-details/:link_id/members', subDetails, (req,res) => {
   res.end()
 })
-router.get('/:campaignId/download', [campaignDownload, pullLinkIds, addMemberLinks], (req, res) => {
+router.get('/:campaignId/download', campaignDownload, (req, res) => {
    let campaign = req.selectedCampaign
     var wb = new xl.Workbook({ 
       defaultFont: {
@@ -291,6 +315,12 @@ router.get('/:campaignId/download', [campaignDownload, pullLinkIds, addMemberLin
     
  
     colCount += 5
+    ws.cell(rowCount, colCount).string("Bounces").style(header2)
+    ws.cell(rowCount+1, colCount).string("Email Address").style(tableHeader)
+    ws.cell(rowCount+1, colCount+1).string("AIR ID").style(tableHeader)
+    ws.cell(rowCount+1, colCount+2).string("Bounce Type").style(tableHeader)
+
+
     ws.column(1).setWidth(40);
     ws.column(2).setWidth(22);
     ws.column(3).setWidth(22);
