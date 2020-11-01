@@ -4,12 +4,11 @@ var router = express.Router()
 var xl = require('excel4node')
 const client = require('@mailchimp/mailchimp_marketing');
 var mongoose = require('mongoose')
+require('../models/report')
 
-const reportSchema = new mongoose.Schema({
-  title: String,
-  id: String
-})
-const Report = mongoose.model('Report', reportSchema)
+
+const Report = mongoose.model('Report')
+
 const reportQuery = Report.find()
 client.setConfig({
     apiKey: process.env.API_KEY,
@@ -18,46 +17,28 @@ client.setConfig({
 
 
 const allCampaigns = async (req,res,next) => {
-  const data = await client.reports.getAllCampaignReports({count: 100})
+  const data = await client.reports.getAllCampaignReports({count: 10})
   res.json(data)
   next()
 }
 router.get('/', allCampaigns, (req,res) => {
   res.end()
 })
+function handleError(error){
+  console.log(error)
+}
 
-function findOrCreate(reportId, data, report){
-  let myReport
-  Report.findOne(reportId).exec(function (err, doc){
+async function findOrCreate(data){
+  const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line}
+  let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
 
-    if(doc) {
-      doc.title = data.campaign_title
-      console.log(`Updated: ${doc}`)
-      myReport = doc
-     }
-    else if (err){
-     return handleError(err)
-    } else {
-      report.save(function (err) {
-         if (err) return handleError(err);
-         else {
-           console.log(`Saved : ${report}` )
-          myReport = report
-         }
-       })
-    }   
-  })
-  return myReport
+  return (myReport ? myReport : Report.newReport(newDetails))
 }
 const oneCampaign = async (req,res,next) => {
-  // const data = await client.reports.getCampaignReport(req.params.campaignId,{fields:["id", "campaign_title", "list_id", "preview_text"]})
   const data = await client.reports.getCampaignReport(req.params.campaignId)
-
-  let report = new Report({title: data.campaign_title, id: data.id})
-
-  findOrCreate({id: report.id}, data, report)
+  const report = await findOrCreate(data)
+  console.log(report)
   res.json(data)
-  next()
 }
 
 router.get('/:campaignId', oneCampaign, (req,res) => {
@@ -109,35 +90,28 @@ const campaignDownload = async(req, res, next) => {
     req.selectedReport = findOrCreate({id: report.id}, data, report)
     next()
 }
-let linkObj = {}
+let linkObj = []
 
 const pullLinkIds = async(req,res,next) => {
-  let links = []
-  for(const k in req.clickData){
-    links.push(req.clickData[k].id)
-    linkObj[k.id] = req.clickData[k].url
-  }
-  req.linkIDs = links
-  next()
-}
-async function asyncForEach(array, callback) {
-  for (let index = 0; index < array.length; index++) {
-    await callback(array[index], index, array);
-  }
-}
-let linkDetailsObj = []
-
-const linkDetails = async(req,res,next) => {
-  await asyncForEach(req.linkIDs, async (id) =>{
-    const response = await client.reports.getSubscribersInfo(req.selectedCampaignID,id, {fields: ["members.email_address", "members.merge_fields","members.clicks"]})  
-    if(response.members[0] != undefined){
-      let linkArr = [id, response.members]
-      linkDetailsObj.push(linkArr)
+  for(const k in req.clickData){ 
+    if(req.clickData[k].tital_clicks > 0) {
+      let obj = {id: req.clickData[k].id, url: req.clickData[k].url}
+      linkObj.push(obj)
     }
-    
-
-  } )
+  }
   next()
+}
+
+
+const addMemberLinks = async(req, res, next) => {
+  const copyLinkObj = Object.assign([], linkObj)
+  await Promise.all(copyLinkObj.map(async (obj)=>{
+    const response = await client.reports.getSubscribersInfo(req.selectedCampaignID,obj.id, {fields: ["members.email_address", "members.merge_fields","members.clicks"]})  
+      console.log("done")
+      // linkObj[obj]['members'] = response.members
+      // console.log(linkObj[obj][members])
+  }))
+
 }
 
 const subDetails = async(req,res,next) => {
@@ -148,7 +122,7 @@ const subDetails = async(req,res,next) => {
 router.get('/:campaign_id/click-details/:link_id/members', subDetails, (req,res) => {
   res.end()
 })
-router.get('/:campaignId/download', [campaignDownload, pullLinkIds, linkDetails], (req, res) => {
+router.get('/:campaignId/download', [campaignDownload, pullLinkIds, addMemberLinks], (req, res) => {
    let campaign = req.selectedCampaign
     var wb = new xl.Workbook({ 
       defaultFont: {
@@ -313,13 +287,14 @@ router.get('/:campaignId/download', [campaignDownload, pullLinkIds, linkDetails]
     
 
     // clicksTable(linkDetailsObj, rowCount, colCount)
-    console.log(linkDetailsObj)
+    console.log(linkObj)
+    
  
     colCount += 5
     ws.column(1).setWidth(40);
     ws.column(2).setWidth(22);
     ws.column(3).setWidth(22);
-    // wb.write(`${campaign.campaign_title}.xlsx`, res);
+    wb.write(`${campaign.campaign_title}.xlsx`, res);
     res.end
 
 })
