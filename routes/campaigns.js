@@ -9,7 +9,7 @@ require('../models/report')
 
 const Report = mongoose.model('Report')
 
-const reportQuery = Report.find()
+
 client.setConfig({
     apiKey: process.env.API_KEY,
     server: process.env.SERVER_PREFIX
@@ -17,7 +17,7 @@ client.setConfig({
 
 
 const allCampaigns = async (req,res,next) => {
-  const data = await client.reports.getAllCampaignReports({count: 10})
+  const data = await client.reports.getAllCampaignReports({count: 50})
   res.json(data)
   next()
 }
@@ -26,29 +26,65 @@ router.get('/', allCampaigns, (req,res) => {
 })
 
 const getSubActivity = async (req, res, next) => {
-  req.subData = await client.reports.getEmailActivityForCampaign(req.params.campaignId, {fields:["emails.email_address", "emails.email_id", "emails.activity"],count:1000})
+  let myCount = 100
+  let myOffset = 0
+  let allEmails = []
+  const data = await client.reports.getCampaignReport(req.params.campaignId, {fields:["emails_sent"]})
+  req.sentnumber = data.emails_sent
+  
+  do {
+    const subData = await client.reports.getEmailActivityForCampaign(req.params.campaignId, {fields:["emails.email_address", "emails.email_id", "emails.activity"],count:myCount, offset:myOffset})
+    
+    allEmails.push(subData.emails.flat())
+    myOffset += 100
+  }while ((myCount + myOffset ) <= req.sentnumber)
+  req.subData = allEmails.flat()
+
   next()
 }
-const showSubActivity = async (req, res, next) => {
+
+const saveSubActivity = async (req, res, next) => {
   const data = req.subData
+  console.log("data", data)
   let usersWhoClicked = []
   let usersWhoBounced = []
-  let usersWithActivity = data.emails.filter(emailObj => {
+
+  let usersWithActivity = data.filter(emailObj => {
     if(emailObj.activity.length > 0){
       if(emailObj.activity[0].action == "bounce"){
         usersWhoBounced.push(emailObj)
         return emailObj
       } else if(emailObj.activity.length > 1){
+
         usersWhoClicked.push(emailObj)
         return emailObj
       }
     }
   })
+  
+  usersWhoBounced.forEach(async (bounceUser) => {
+    const airID = await client.lists.getListMember(req.selectedList, bounceUser.email_id, {fields:["merge_fields"]})
+    bounceUser["merge_fields"] = airID.merge_fields
+  })
+  usersWhoClicked.forEach(async (clickUser) => {
+    const airID = await client.lists.getListMember(req.selectedList, clickUser.email_id, {fields:["merge_fields"]})
+    clickUser["merge_fields"] = airID.merge_fields
+  })
+
+ 
+  req.usersWhoBounced = usersWhoBounced
+  req.usersWhoClicked = usersWhoClicked
   req.usersWithActivity = usersWithActivity
-  res.json(data)
+    next()
+}
+
+const showSubActivity = async (req, res, next) => {
+  res.json(req.subData)
   next()
+
 }
 router.get('/:campaignId/activity', [getSubActivity, showSubActivity], (req,res) => {
+  
   res.end()
 })
 
@@ -79,6 +115,17 @@ router.get('/:campaignId/clicks', campaignClicks, (req,res) => {
   res.end()
 })
 
+const getUnsubs = async (req, res, next) => {
+  const data = await client.reports.getUnsubscribedListForCampaign(req.params.campaignId, {fields:["unsubscribes"]})
+  req.unsubs = data.unsubscribes
+  
+  next()
+}
+
+router.get('/:campaignId/unsubscribers', getUnsubs, (req, res) =>{
+  res.json(req.unsubs)
+  res.end()
+})
 const campaignOpens = async (req,res,next) => {
   const data = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
   res.json(data)
@@ -92,7 +139,7 @@ router.get('/:campaignId/opens', campaignOpens, (req,res) => {
 
 const campaignEmailClicks = async (req,res,next) => {
   const data = await client.reports.getCampaignClickDetails(req.params.campaignId)
-  res.json(data)
+  
   next()
 }
 
@@ -100,6 +147,16 @@ router.get('/:campaignId/clicks-by-email', campaignEmailClicks, (req,res) => {
   res.end()
 })
 
+const getList = async(req, res, next) => {
+  const data = await client.reports.getCampaignReport(req.params.campaignId, {fields:["list_id"]})
+  req.selectedList = data.list_id
+  req.sentnumber = data.emails_sent
+  next()
+}
+router.get('/:campaignId/list', getList, (req, res) => {
+
+  res.end()
+})
 const campaignDownload = async(req, res, next) => {
 
     const data = await client.reports.getCampaignReport(req.params.campaignId)
@@ -107,46 +164,17 @@ const campaignDownload = async(req, res, next) => {
     const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
     let report =  await findOrCreate(data)
     req.selectedCampaign = data
+    
     req.selectedCampaignID = req.params.campaignId
     req.clickData = clickData.urls_clicked
-    req.openData = []
     req.openData = openData.members
-    req.selectedReport = findOrCreate({id: report.id}, data, report)
+    req.selectedReport = report
     next()
 }
-let linkObj = []
-
-const pullLinkIds = async(req,res,next) => {
-  for(const k in req.clickData){ 
-    if(req.clickData[k].total_clicks > 0) {
-      let obj = {id: req.clickData[k].id, url: req.clickData[k].url}
-      linkObj.push(obj)
-    }
-  }
-  next()
-}
 
 
-const addMemberLinks = async(req, res, next) => {
-  const copyLinkObj = Object.assign([], linkObj)
-  await Promise.all(copyLinkObj.map(async (obj)=>{
-    const response = await client.reports.getSubscribersInfo(req.selectedCampaignID,obj.id, {fields: ["members.email_address", "members.merge_fields","members.clicks"]})  
-      console.log("done")
-      // linkObj[obj]['members'] = response.members
-      // console.log(linkObj[obj][members])
-  }))
-
-}
-
-const subDetails = async(req,res,next) => {
-    const response = await client.reports.getSubscribersInfo(req.params.campaign_id,req.params.link_id, {fields: ["members.email_address", "members.merge_fields","members.clicks"]})   
-    res.json(response.members)
-  next()
-}
-router.get('/:campaign_id/click-details/:link_id/members', subDetails, (req,res) => {
-  res.end()
-})
-router.get('/:campaignId/download', campaignDownload, (req, res) => {
+router.get('/:campaignId/download', [getList, getSubActivity, saveSubActivity, getUnsubs, campaignDownload], (req, res) => {
+  
    let campaign = req.selectedCampaign
     var wb = new xl.Workbook({ 
       defaultFont: {
@@ -189,7 +217,16 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
     const bounceRate = (bounces / sent)
     const openRate = (campaign.opens.unique_opens / sent)
     const uniqueClicks = campaign.clicks.unique_subscriber_clicks
-    const clickRate =  (uniqueClicks/ campaign.opens.opens_total)
+    const clickRate = () => {
+      if(uniqueClicks > 0 ){
+        return uniqueClicks/ campaign.opens.opens_total
+      } else {
+        return 0.00
+      }
+    } 
+   
+    
+  
 
     function checkDate(date, row, col){
       if (date == ""){
@@ -204,7 +241,7 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
     function clickURLTable(obj, x, y){
       
       for (const k in obj){
-      clickTableCells.push(ws.cell(x, y).string(obj[k].url))
+      clickTableCells.push(ws.cell(x, y).link(obj[k].url))
       clickTableCells.push(ws.cell(x, y+1).number(obj[k].total_clicks))
       clickTableCells.push(ws.cell(x, y+2).number(obj[k].unique_clicks)) 
         x+= 1
@@ -220,9 +257,21 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
       for (const k in obj){
       openTableCells.push(ws.cell(x, y).string(obj[k].email_address))
       if(obj[k].merge_fields.AIRID){
-        openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))
+        if(parseInt(obj[k].merge_fields.AIRID) != NaN){
+          openTableCells.push(ws.cell(x, y+1).number(praseInt(obj[k].merge_fields.AIRID)))
+        } else{
+          openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.AIRID))
+        }
+        
       } else if(obj[k].merge_fields.MMERGE4){
-        openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.MMERGE4))
+        if(parseInt(obj[k].merge_fields.MMERGE4) != NaN){
+          openTableCells.push(ws.cell(x, y+1).number(parseInt(obj[k].merge_fields.MMERGE4)))
+        } else {
+          openTableCells.push(ws.cell(x, y+1).string(obj[k].merge_fields.MMERGE4))
+        }
+        
+      } else {
+        openTableCells.push(ws.cell(x, y+1).string("N/A"))
       }
       
       openTableCells.push(ws.cell(x, y+2).number(obj[k].opens_count)) 
@@ -232,25 +281,89 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
       return openTableCells
       
     }
-    let clicksEmailTable = []
-    function clicksTable(obj, x, y){
-      for (const [k, v] in obj){
+    let bounceTableCells = []
 
-          clicksEmailTable.push(ws.cell(x, y).string(obj[k].email_address))   
-          // if(obj[k].merge_fields && obj[k].merge_fields['MMERGE4']){
-          //   clicksEmailTable.push(ws.cell(x, y+1).string(obj[k].merge_fields['MMERGE4']))  
-          // } else if ( obj[k].merge_fields && obj[k].merge_fields['AIRID']){
-          //   clicksEmailTable.push(ws.cell(x, y+1).string(obj[k].merge_fields['AIRID']))  
-          // }
-          // clicksEmailTable.push(ws.cell(x, y+2).number(obj[k].opens_count)) 
-
-        x+= 1
+    function bounceTable(arr, x, y){
+      if(arr.length === 0){
+        bounceTableCells.push(ws.cell(x, y).string("N/A"))
+        bounceTableCells.push(ws.cell(x, y+1).string("N/A"))
+        bounceTableCells.push(ws.cell(x, y+2).string("N/A"))
       }
-      colCount += 3
-      return clicksEmailTable
+      else {
+        arr.forEach(user =>{
+
+        bounceTableCells.push(ws.cell(x, y).string(user.email_address))
+        if(user.merge_fields){
+          if(user.merge_fields.AIRID){
+            bounceTableCells.push(ws.cell(x, y+1).number(parseInt(user.merge_fields.AIRID)))
+          } else if(user.merge_fields.MMERGE4){
+            bounceTableCells.push(ws.cell(x, y+1).number(parseInt(user.merge_fields.MMERGE4)))
+          } 
+          
+        }else {
+          bounceTableCells.push(ws.cell(x, y+1).string("N/A"))
+        }
+       
+        
+        bounceTableCells.push(ws.cell(x, y+2).string(user.activity[0].type)) 
+        x +=1
+        
+      })}
+      colCount += 2
+      return bounceTableCells
       
     }
-    
+    let clicksTableCells = []
+    function clicksTable(arr, x, y){
+      arr.forEach(user =>{
+        user.activity.forEach(action => {
+          if(action.action == "click"){
+            clicksTableCells.push(ws.cell(x, y).string(user.email_address))
+            if(user.merge_fields){
+              if(user.merge_fields.AIRID){
+                clicksTableCells.push(ws.cell(x, y+1).number(parseInt(user.merge_fields.AIRID)))
+            } else if(user.merge_fields.MMERGE4){
+              clicksTableCells.push(ws.cell(x, y+1).number(parseInt(user.merge_fields.MMERGE4)))
+            }
+              }
+              else {
+              clicksTableCells.push(ws.cell(x, y+1).string("N/A"))
+            }
+            clicksTableCells.push(ws.cell(x, y+2).string((action.url.split("?")[0])))       
+            x +=1
+          }
+        })
+      
+        
+      })    
+      colCount += 3
+      return clicksTableCells
+      
+    }
+    let unsubsTableCells = []
+    function unsubTable(x, y){
+      if(req.unsubs.length < 1){
+        unsubsTableCells.push(ws.cell(x, y).string("N/A"))
+        unsubsTableCells.push(ws.cell(x, y+1).string("N/A"))
+        unsubsTableCells.push(ws.cell(x, y+2).string("N/A"))
+      }else{
+        req.unsubs.forEach(unsub =>{
+          if(unsub.merge_fields){
+            if(unsub.merge_fields.AIRID){
+              unsubsTableCells.push(ws.cell(x, y+1).number(parseInt(unsub.merge_fields.AIRID)))
+            } else if (unsub.merge_fields.MMERGE4){
+              unsubsTableCells.push(ws.cell(x, y+1).number(parseInt(unsub.merge_fields.MMERGE4)))
+            }
+          } else {
+            unsubsTableCells.push(ws.cell(x, y+1).string("N/A"))
+          }
+          unsubsTableCells.push(ws.cell(x, y).string(unsub.email_address), ws.cell(x, y+2).string("N/A"), ws.cell(x, y+2).string(unsub.reason))
+          x += 1
+        })
+        
+      }
+      return unsubsTableCells
+    }
     
     ws.cell(1, 1).string('Email Campaign Report').style({font:{size:20, bold:true}})
     ws.cell(2, 1).string('Title:').style(header1)
@@ -279,9 +392,11 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
     ws.cell(15, 1).string('Recipients Who Clicked:').style(bold)
     ws.cell(15, 2).number(uniqueClicks).style(rBorder)
     ws.cell(16, 1).string('Click-Through Rate:').style(bold)
-    ws.cell(16, 2).number(clickRate).style({numberFormat:'0.00%', border:{right:{style:'thin', color:'#000000'}}})
+      ws.cell(16, 2).number(clickRate()).style({numberFormat:'0.00%', border:{right:{style:'thin', color:'#000000'}}})
+    
     ws.cell(17, 1).string('Total Clicks:').style(bold)
     ws.cell(17, 2).number(campaign.clicks.clicks_total).style(rBorder)
+
     ws.cell(18, 1).string('Last Click Date:').style(bold)
     checkDate(campaign.clicks.last_click, 18, 2)
     ws.cell(19, 1).string('Total Unsubs:').style(bold) 
@@ -302,30 +417,34 @@ router.get('/:campaignId/download', campaignDownload, (req, res) => {
     openTable(req.openData, rowCount+2, 1)
 
     ws.cell(rowCount, colCount).string("Clicks by Email Address").style(header2)
+    
     ws.cell(rowCount+1, colCount).string("Email Address").style(tableHeader)
     ws.cell(rowCount+1, colCount+1).string("AIR ID").style(tableHeader)
     ws.cell(rowCount+1, colCount+2).string("URL").style(tableHeader)
     ws.cell(rowCount+1, colCount+3).string("Clicks").style(tableHeader)
+    clicksTable(req.usersWhoClicked, rowCount+2, colCount)
 
+    colCount += 2
 
-    
-
-    // clicksTable(linkDetailsObj, rowCount, colCount)
-    console.log(linkObj)
-    
- 
-    colCount += 5
     ws.cell(rowCount, colCount).string("Bounces").style(header2)
     ws.cell(rowCount+1, colCount).string("Email Address").style(tableHeader)
     ws.cell(rowCount+1, colCount+1).string("AIR ID").style(tableHeader)
     ws.cell(rowCount+1, colCount+2).string("Bounce Type").style(tableHeader)
+    bounceTable(req.usersWhoBounced, rowCount+2,colCount)
+    
+    colCount += 2
 
+    ws.cell(rowCount, colCount).string("Unsubscribes").style(header2)
+    ws.cell(rowCount+1, colCount).string("Email Address").style(tableHeader)
+    ws.cell(rowCount+1, colCount+1).string("AIR ID").style(tableHeader)
+    ws.cell(rowCount+1, colCount+2).string("Reason").style(tableHeader)
+    
+    unsubTable( rowCount+2, colCount)
 
     ws.column(1).setWidth(40);
     ws.column(2).setWidth(22);
     ws.column(3).setWidth(22);
     wb.write(`${campaign.campaign_title}.xlsx`, res);
-    res.end
 
 })
 
