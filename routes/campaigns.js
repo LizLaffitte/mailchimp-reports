@@ -34,7 +34,7 @@ router.get('/', allCampaigns, (req,res) => {
 })
 
 const getSubActivity = async (req, res, next) => {
-  let myCount = 100
+  let myCount = 1000
   let myOffset = 0
   let allEmails = []
   let data
@@ -48,13 +48,14 @@ const getSubActivity = async (req, res, next) => {
   
   do {
     try{
+      
       const subData = await client.reports.getEmailActivityForCampaign(req.params.campaignId, {fields:["emails.email_address", "emails.email_id", "emails.activity"],count:myCount, offset:myOffset})
       allEmails.push(subData.emails.flat())
     }catch(err){
       console.log(err)
     }
    
-    myOffset += 100
+    myOffset += 1000
   }while ((myCount + myOffset ) <= req.sentnumber)
   req.subData = allEmails.flat()
 
@@ -73,27 +74,41 @@ const saveSubActivity = async (req, res, next) => {
         usersWhoBounced.push(emailObj)
         return emailObj
       } else if(emailObj.activity.length > 1){
-
         usersWhoClicked.push(emailObj)
         return emailObj
       }
     }
   })
+  let myCount = 1000
+  let myOffset = 1000
+  let sendList = []
+  try {
+    do{
+      const subData =  await client.reports.getCampaignRecipients(req.params.campaignId, {fields:["sent_to.email_address", "emails.email_id"], count: myCount});
+      sendList.push(subData)
+      myOffset += 1000
+    } while((myCount + myOffset < req.sentnumber))
+    
+  } catch(err){
+    console.log(err)
+  }
   
-  usersWhoBounced.forEach(async (bounceUser) => {
-    try{
-      const airID = await client.lists.getListMember(req.selectedList, bounceUser.email_id, {fields:["merge_fields"]})
-      bounceUser["merge_fields"] = airID.merge_fields
-    } catch(err){
-      console.lof(err)
-    }
+  // usersWhoBounced.forEach((bounceUser) => {
+   
     
+  //     bounceUser["merge_fields"] = airID.merge_fields
+
     
-  })
-  usersWhoClicked.forEach(async (clickUser) => {
-    const airID = await client.lists.getListMember(req.selectedList, clickUser.email_id, {fields:["merge_fields"]})
-    clickUser["merge_fields"] = airID.merge_fields
-  })
+  // })
+  // usersWhoClicked.forEach(async (clickUser) => {
+  //   try{
+  //     const airID = await client.lists.getListMember(req.selectedList, clickUser.email_id, {fields:["merge_fields"]})
+  //     clickUser["merge_fields"] = airID.merge_fields
+  //   }catch(err){
+  //     console.log(err)
+  //   }
+    
+  // })
 
  
   req.usersWhoBounced = usersWhoBounced
@@ -112,6 +127,33 @@ router.get('/:campaignId/activity', [getSubActivity, showSubActivity], (req,res)
   res.end()
 })
 
+const getSent = async (req, res, next) => {
+  // var arr = obj1.filter(function(item){
+  //   return obj2.indexOf(item.id) === -1;
+  // });
+
+  let myCount = 1000
+  let myOffset = 1000
+  let sendList = []
+  try {
+    do{
+      const subData =  await client.reports.getCampaignRecipients(req.params.campaignId, {fields:["sent_to.email_address", "sent_toemail_id", "sent_to.merge_fields"], count: myCount});
+      sendList.push(subData.sent_to)
+      myOffset += 1000
+    } while((myCount + myOffset < req.sentnumber))
+    
+  } catch(err){
+    console.log(err)
+  }
+  req.sendList = sendList[0]
+  res.json(sendList[0])
+  next()
+}
+
+router.get('/:campaignId/sent-to', getSent, (req, res) =>{
+  res.end()
+})
+
 async function findOrCreate(data){
   const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line, bounces: (data.bounces.hard_bounces + data.bounces.soft_bounces)}
   let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
@@ -119,10 +161,17 @@ async function findOrCreate(data){
   return (myReport ? myReport : Report.newReport(newDetails))
 }
 const oneCampaign = async (req,res,next) => {
-  const data = await client.reports.getCampaignReport(req.params.campaignId)
-  const report = await findOrCreate(data)
-  console.log("Report:", report)
-  res.json(data)
+  try{
+    const data = await client.reports.getCampaignReport(req.params.campaignId)
+    const report = await findOrCreate(data)
+    console.log("Report:", report)
+    res.json(data)
+  }catch(err){
+    console.log(err)
+    res.send(`There was an error: ${err}`)
+  }
+ 
+ 
 }
 
 router.get('/:campaignId', oneCampaign, (req,res) => {
@@ -140,8 +189,14 @@ router.get('/:campaignId/clicks', campaignClicks, (req,res) => {
 })
 
 const getUnsubs = async (req, res, next) => {
-  const data = await client.reports.getUnsubscribedListForCampaign(req.params.campaignId, {fields:["unsubscribes"]})
-  req.unsubs = data.unsubscribes
+  try{
+    const data = await client.reports.getUnsubscribedListForCampaign(req.params.campaignId, {fields:["unsubscribes"]})
+    req.unsubs = data.unsubscribes  
+  }catch(err){
+    console.log(err)
+    req.unsubs = {}
+  }
+  
   
   next()
 }
@@ -151,8 +206,14 @@ router.get('/:campaignId/unsubscribers', getUnsubs, (req, res) =>{
   res.end()
 })
 const campaignOpens = async (req,res,next) => {
-  const data = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
-  res.json(data)
+  try{
+    const data = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
+    res.json(data)
+  } catch(err){
+    console.log(err)
+    res.send("Something went wrong")
+  }
+  
   next()
 }
 
@@ -162,7 +223,15 @@ router.get('/:campaignId/opens', campaignOpens, (req,res) => {
 
 
 const campaignEmailClicks = async (req,res,next) => {
-  const data = await client.reports.getCampaignClickDetails(req.params.campaignId)
+  try{
+    const data = await client.reports.getCampaignClickDetails(req.params.campaignId)
+    res.json(data)
+  }
+  catch(err){
+    console.log(err)
+    res.send("Something went wrong")
+  }
+  
   
   next()
 }
@@ -172,9 +241,14 @@ router.get('/:campaignId/clicks-by-email', campaignEmailClicks, (req,res) => {
 })
 
 const getList = async(req, res, next) => {
-  const data = await client.reports.getCampaignReport(req.params.campaignId, {fields:["list_id"]})
-  req.selectedList = data.list_id
-  req.sentnumber = data.emails_sent
+  try{
+    const data = await client.reports.getCampaignReport(req.params.campaignId, {fields:["list_id"]})
+    req.selectedList = data.list_id
+    req.sentnumber = data.emails_sent
+  }catch(err){
+    console.log(err)
+  }
+  
   next()
 }
 router.get('/:campaignId/list', getList, (req, res) => {
@@ -182,7 +256,7 @@ router.get('/:campaignId/list', getList, (req, res) => {
   res.end()
 })
 const campaignDownload = async(req, res, next) => {
-
+  try{
     const data = await client.reports.getCampaignReport(req.params.campaignId)
     const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
     const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
@@ -193,6 +267,12 @@ const campaignDownload = async(req, res, next) => {
     req.clickData = clickData.urls_clicked
     req.openData = openData.members
     req.selectedReport = report
+
+  }catch(err){
+    console.log(err)
+
+  }
+  
     next()
 }
 
