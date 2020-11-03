@@ -155,7 +155,7 @@ router.get('/:campaignId/sent-to', getSent, (req, res) =>{
 })
 
 async function findOrCreate(data){
-  const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line, bounces: (data.bounces.hard_bounces + data.bounces.soft_bounces)}
+  const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line, send_time: data.send_time, bounces: (data.bounces.hard_bounces + data.bounces.soft_bounces)}
   let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
 
   return (myReport ? myReport : Report.newReport(newDetails))
@@ -177,7 +177,10 @@ const oneCampaign = async (req,res,next) => {
 router.get('/:campaignId', oneCampaign, (req,res) => {
   res.end()
 })
-
+router.get('/:campaignId/report', async (req,res) => {
+  let myReport = await Report.findOne({id: req.params.campaignId})
+  res.json(myReport.toJSON())
+})
 const campaignClicks = async (req,res,next) => {
   const data = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
   res.json(data)
