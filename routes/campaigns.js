@@ -154,16 +154,11 @@ router.get('/:campaignId/sent-to', getSent, (req, res) =>{
   res.end()
 })
 
-async function findOrCreate(data){
-  const newDetails = {id: data.id, title: data.campaign_title, subject_line: data.subject_line, send_time: data.send_time, bounces: (data.bounces.hard_bounces + data.bounces.soft_bounces)}
-  let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
 
-  return (myReport ? myReport : Report.newReport(newDetails))
-}
 const oneCampaign = async (req,res,next) => {
   try{
     const data = await client.reports.getCampaignReport(req.params.campaignId)
-    const report = await findOrCreate(data)
+    const report = await Report.findOrCreate(data)
     console.log("Report:", report)
     res.json(data)
   }catch(err){
@@ -263,7 +258,7 @@ const campaignDownload = async(req, res, next) => {
     const data = await client.reports.getCampaignReport(req.params.campaignId)
     const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
     const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
-    let report =  await findOrCreate(data)
+    let report = await Report.findOrCreate(data)
     req.selectedCampaign = data
     
     req.selectedCampaignID = req.params.campaignId
