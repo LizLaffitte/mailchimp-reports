@@ -1,19 +1,23 @@
 const mongoose = require('mongoose')
 const reportSchema = new mongoose.Schema({
-    title: String,
     id: String,
+    title: String,
+    list_id: String,
     subject_line: String,
-    bounces: Number
+    preview_text: String,
+    send_time: Date,
+    sent: Number,
+    abuse_reports: Number,
+    unsubscribed: Number,
+    bounces: Number,
+    opens: Number,
+    total_opens: Number,
+    last_open: Date,
+    clicks: Number,
+    total_clicks: Number,
+    last_click: Date,
+    
 })
-
-reportSchema.statics.findOneOrCreate = function findOneOrCreate(condition, callback){
-    const self = this
-    self.findOne(condition, (err, result) => {
-        return result ? callback(err, result) : self.create(condition, (err, result) => {
-            return callback(err, result)
-        })
-    })
-}
 
 reportSchema.statics.newReport = async function newReport(dataObj){
     let report = new Report(dataObj)
@@ -23,6 +27,31 @@ reportSchema.statics.newReport = async function newReport(dataObj){
 
 }
 
+reportSchema.statics.findOrCreate =  async function findOrCreate(data){
+    const newDetails = {
+      id: data.id, 
+      title: data.campaign_title, 
+      list_id: data.list_id,
+      subject_line: data.subject_line, 
+      preview_text: data.preview_text, 
+      send_time: data.send_time, 
+      sent: data.emails_sent,
+      bounces: (data.bounces.hard_bounces + data.bounces.soft_bounces),
+      opens: data.opens.unique_opens,
+      total_opens: data.opens.opens_total,
+      last_open: data.opens.last_open,
+      clicks: data.clicks.unique_clicks,
+      total_clicks: data.clicks.clicks_total,
+      last_click: data.clicks.last_click
+    }
+    let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
+  
+    return (myReport ? myReport : Report.newReport(newDetails))
+  }
+
+//   reportSchema.methods.addUpdateOpens = async function addUpdateOpens(data){
+
+//   }
 
 
 const Report = mongoose.model('Report', reportSchema)
