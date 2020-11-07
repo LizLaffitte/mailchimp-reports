@@ -20,7 +20,7 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/campaign.js"
+            "program": "${workspaceFolder}/routes/campaign.js"
         }
     ]
 }
