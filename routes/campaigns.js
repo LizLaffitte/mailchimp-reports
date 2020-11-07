@@ -159,13 +159,13 @@ const oneCampaign = async (req,res,next) => {
   try{
     const data = await client.reports.getCampaignReport(req.params.campaignId)
     const report = await Report.findOrCreate(data)
-    console.log("Report:", report)
+    console.log("Report:", report,  report.isNew)
     res.json(data)
   }catch(err){
     console.log(err)
     res.send(`There was an error: ${err}`)
   }
- 
+ next()
  
 }
 
