@@ -153,14 +153,41 @@ const getSent = async (req, res, next) => {
 router.get('/:campaignId/sent-to', getSent, (req, res) =>{
   res.end()
 })
+ 
+async function buildOpensData(id, opened){
+let offSet = 0
+  let openData = []
+  try{
+    while( offSet < opened){
+      console.log(openData, offSet)
+      let data = await client.reports.getCampaignOpenDetails(id, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000, offset:offSet})
+      data.members.map(member => {
+        delete member.opens
+      })
+      openData.push(data.members)
+      offSet += 1000
+      console.log(openData, offSet)
+    }
+
+    return openData.flat()
+  }catch(err){
+    console.log(err)
+    return err
+  }
+  
+}
 
 
 const oneCampaign = async (req,res,next) => {
   try{
+    
     const data = await client.reports.getCampaignReport(req.params.campaignId)
-    const report = await Report.findOrCreate(data)
+    const openData = await buildOpensData(req.params.campaignId, data.opens.opens_total)
+    const unsubData = await client.reports.getUnsubscribedListForCampaign(req.params.campaignId, {fields:["unsubscribes"], count:1000})
+    const report = await Report.findOrCreate(data, openData, unsubData.unsubscribes)
+    
     console.log("Report:", report,  report.isNew)
-    res.json(data)
+    res.json(report)
   }catch(err){
     console.log(err)
     res.send(`There was an error: ${err}`)
@@ -188,7 +215,7 @@ router.get('/:campaignId/clicks', campaignClicks, (req,res) => {
 
 const getUnsubs = async (req, res, next) => {
   try{
-    const data = await client.reports.getUnsubscribedListForCampaign(req.params.campaignId, {fields:["unsubscribes"]})
+    const data = await client.reports.getUnsubscribedListForCampaign(req.params.campaignId, {fields:["unsubscribes"], count:1000})
     req.unsubs = data.unsubscribes  
   }catch(err){
     console.log(err)
@@ -258,7 +285,7 @@ const campaignDownload = async(req, res, next) => {
     const data = await client.reports.getCampaignReport(req.params.campaignId)
     const clickData = await client.reports.getCampaignClickDetails(req.params.campaignId, {fields:[ "urls_clicked.id", "urls_clicked.url", "urls_clicked.total_clicks", "urls_clicked.unique_clicks"], count:1000})
     const openData = await client.reports.getCampaignOpenDetails(req.params.campaignId, {fields:["members.email_address", "members.merge_fields", "members.opens_count"], count:1000})
-    let report = await Report.findOrCreate(data)
+    let report = await Report.findOrCreate(data, openData.members)
     req.selectedCampaign = data
     
     req.selectedCampaignID = req.params.campaignId

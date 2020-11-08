@@ -16,6 +16,8 @@ const reportSchema = new mongoose.Schema({
     clicks: Number,
     total_clicks: Number,
     last_click: Date,
+    member_opens: Array,
+    unsub_list: Array
     
 })
 
@@ -27,7 +29,7 @@ reportSchema.statics.newReport = async function newReport(dataObj){
 
 }
 
-reportSchema.statics.findOrCreate =  async function findOrCreate(data){
+reportSchema.statics.findOrCreate =  async function findOrCreate(data, openData, unsubData){
     const newDetails = {
       id: data.id, 
       title: data.campaign_title, 
@@ -42,16 +44,15 @@ reportSchema.statics.findOrCreate =  async function findOrCreate(data){
       last_open: data.opens.last_open,
       clicks: data.clicks.unique_clicks,
       total_clicks: data.clicks.clicks_total,
-      last_click: data.clicks.last_click
+      last_click: data.clicks.last_click,
+      member_opens: openData,
+      unsub_list: unsubData
     }
     let myReport = await Report.findOneAndUpdate({id: data.id}, newDetails, {new: true})
   
     return (myReport ? myReport : Report.newReport(newDetails))
   }
 
-//   reportSchema.methods.addUpdateOpens = async function addUpdateOpens(data){
-
-//   }
 
 
 const Report = mongoose.model('Report', reportSchema)
